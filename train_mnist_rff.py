@@ -69,6 +69,8 @@ def main(config):
             kernel = ConvSimple
         elif (config.kernel == "DeepConv"):
             kernel = "DeepConv"
+        elif (config.kernel == "DeepConv2"):
+            kernel = "DeepConv2"
 
         N, K, T, d = X.shape[0], config.num_trajectories, config.num_timesteps, X.shape[1]
 
@@ -109,7 +111,8 @@ def main(config):
             kernel=kernel,
             stride=config.stride,
             patch_size=config.patch_size,
-            image_size=config.image_size
+            image_size=config.image_size,
+            depth=config.depth
             )
 
         model.eval()

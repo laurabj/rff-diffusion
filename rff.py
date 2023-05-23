@@ -28,10 +28,16 @@ def extract_image_patches(x, patch_size, stride=1, dilation=1):
     x = F.pad(x, (pad_row//2, pad_row - pad_row//2, pad_col//2, pad_col - pad_col//2))
     # Extract patches
     # patches = x.unfold(2, num_windows, stride).unfold(3, num_windows, stride)
+    print("before unfold")
+    print(x.shape)
     patches = x.unfold(2, patch_size, stride).unfold(3, patch_size, stride)
     # patches = patches.permute(0,4,5,1,2,3).contiguous()#.cuda()
+    print("before reshape")
+    print(patches.shape)
+    print("b: " + str(b))
     temp = patches.reshape(b,-1,patches.shape[-2], patches.shape[-1])
-    # print("patches shape: " + str(temp.shape))
+    print("after reshape")
+    print("patches shape: " + str(temp.shape))
     return temp
     # return patches.view(b,-1,patches.shape[-2], patches.shape[-1])
 
@@ -179,13 +185,14 @@ class RandomFourierFeatures(nn.Module):
             self.feature_mapping_conv if self.conv else # from conv_rff
             self.feature_mapping_dskn if kernel == "DSKN" else
             self.feature_mapping_deep_conv if kernel == "DeepConv" else
+            self.feature_mapping_deep_conv_2 if kernel == "DeepConv2" else
             self.feature_mapping_rff)
 
         if not self.arccos:
             self.f_kernel = self.fourier_transform(self.kernel)
 
         self.init_params()
-        if kernel != "DSKN" and kernel != "DeepConv":
+        if kernel != "DSKN" and kernel != "DeepConv" and kernel != "DeepConv2":
             self.variance = self.kernel.variance
 
         self.phi = self.feature_mapping_fn(self.x)
@@ -222,6 +229,8 @@ class RandomFourierFeatures(nn.Module):
             kernel = "DSKN"
         elif kernel == "DeepConv":
             kernel = "DeepConv"
+        elif kernel == "DeepConv2":
+            kernel = "DeepConv2"
         else:
             kernel = kernel(input_dim=self.x.shape[1], variance=torch.tensor(1.0))
         return kernel
@@ -323,6 +332,8 @@ class RandomFourierFeatures(nn.Module):
             n, dim_x = self.x.shape
             std_w = math.sqrt(self.variance_w  / dim_x)
             std_b = math.sqrt(self.variance_b)
+            print("std_w: " + str(std_w))
+            print("std_b: " + str(std_b))
 
             self.num_x_features = self.num_features
             self.num_t_features = 500
@@ -451,48 +462,101 @@ class RandomFourierFeatures(nn.Module):
             std_w = math.sqrt(self.variance_w  / dim_x)
             std_b = math.sqrt(self.variance_b)
 
-            self.num_x_features = 1000
+            self.num_x_features = self.num_features
             self.num_t_features = 500
-            self.sigma0 = 2 #1e-2
-            self.sigma1 = 2 #1e-6
+
+            self.sigma0 = 0.03#1e-3 #1e-2
+            self.sigma1 = 0.03#1e-3 #1e-6
             self.growth_factor = 1.0
-            # self.kernel_size = 3
-            # out_channels = None
-            # padding = None
+
+            self.kernel_size = 5
+            out_channels = 1 # Not sure what to use here
+            _padding = 'same' #0 # default padding
+            padding_mode = 'zeros'
+            self.out_dimension = out_channels * self.image_size * self.image_size # not sure here
 
             # For deep RFF for x (based on CSKN)
-            # self.op_list0 = [nn.Conv2d(in_channels=1, out_channels, kernel_size=self.kernel_size, padding=_padding)]
-            # self.op_list1 = [nn.Conv2d(in_channels=1, out_channels, kernel_size=self.kernel_size, padding=_padding)]
-            # for _ in range(self.depth - 1):
-            #     op_tmp0 = nn.Conv2d(out_channels, out_channels, kernel_size=self.kernel_size, padding=_padding)
-            #     op_tmp1 = nn.Conv2d(out_channels, out_channels, kernel_size=self.kernel_size, padding=_padding)
-            #     self.op_list0.append(op_tmp0)
-            #     self.op_list1.append(op_tmp1)
-            # self.op_list0 = nn.ModuleList(self.op_list0)
-            # self.op_list1 = nn.ModuleList(self.op_list1)
-            # for i in range(len(self.op_list0)):
-            #     nn.init.normal_(self.op_list0[i].weight, 0, self.sigma0 * math.pow(self.growth_factor, i))
-            #     nn.init.normal_(self.op_list1[i].weight, 0, self.sigma1 * math.pow(self.growth_factor, i))
-            #     nn.init.uniform_(self.op_list0[i].bias, a=0, b=2*math.pi)
-            #     self.op_list0[i].weight.requires_grad = False
-            #     self.op_list1[i].weight.requires_grad = False
-            #     self.op_list0[i].bias.requires_grad = False
-            #     self.op_list1[i].bias = self.op_list0[i].bias
+            self.op_list0 = [nn.Conv2d(in_channels=1, out_channels=out_channels, kernel_size=self.kernel_size, padding=_padding, padding_mode=padding_mode)]
+            self.op_list1 = [nn.Conv2d(in_channels=1, out_channels=out_channels, kernel_size=self.kernel_size, padding=_padding, padding_mode=padding_mode)]
+            for _ in range(self.depth - 1):
+                op_tmp0 = nn.Conv2d(out_channels, out_channels, kernel_size=self.kernel_size, padding=_padding, padding_mode=padding_mode)
+                op_tmp1 = nn.Conv2d(out_channels, out_channels, kernel_size=self.kernel_size, padding=_padding, padding_mode=padding_mode)
+                self.op_list0.append(op_tmp0)
+                self.op_list1.append(op_tmp1)
+            self.op_list0 = nn.ModuleList(self.op_list0)
+            self.op_list1 = nn.ModuleList(self.op_list1)
+            for i in range(len(self.op_list0)):
+                nn.init.normal_(self.op_list0[i].weight, 0, self.sigma0 * math.pow(self.growth_factor, i))
+                nn.init.normal_(self.op_list1[i].weight, 0, self.sigma1 * math.pow(self.growth_factor, i))
+                nn.init.uniform_(self.op_list0[i].bias, a=0, b=2*math.pi)
+                self.op_list0[i].weight.requires_grad = False
+                self.op_list1[i].weight.requires_grad = False
+                self.op_list0[i].bias.requires_grad = False
+                self.op_list1[i].bias = self.op_list0[i].bias
+            print("test")
+            print(self.op_list0[0].weight.shape)
+            print(self.op_list0[1].weight.shape)
 
             # For deep RFF for x  (based on DSKN)
-            num_patches = ((self.image_size - self.patch_size + 1) // self.stride) ** 2
-            len_input = num_patches * self.patch_size ** 2
-            # self.x_omegas_1 = [torch.normal(0, std_w, size=([len_input, self.num_x_features])).double().to(self.device)] # Arjun
-            # self.x_omegas_2 = [torch.normal(0, std_w, size=([len_input, self.num_x_features])).double().to(self.device)] # Arjun
-            self.x_omegas_1 = [Normal(0, self.sigma0).sample([len_input, self.num_x_features]).double().to(self.device)] # DSKN
-            self.x_omegas_2 = [Normal(0, self.sigma1).sample([len_input, self.num_x_features]).double().to(self.device)] # DSKN
-            self.x_bs_1 = [Uniform(0, 2 * math.pi).sample([self.num_x_features]).to(self.device)]
-            self.x_bs_2 = [Uniform(0, 2 * math.pi).sample([self.num_x_features]).to(self.device)]
-            for i in range(1, self.depth):
-                self.x_omegas_1.append(Normal(0, self.sigma0 * math.pow(self.growth_factor, i)).sample([self.num_x_features, self.num_x_features]).double().to(self.device))
-                self.x_omegas_2.append(Normal(0, self.sigma1 * math.pow(self.growth_factor, i)).sample([self.num_x_features, self.num_x_features]).double().to(self.device))
-                self.x_bs_1.append(Uniform(0, 2 * math.pi).sample([self.num_x_features]).to(self.device))
-                self.x_bs_2.append(Uniform(0, 2 * math.pi).sample([self.num_x_features]).to(self.device))
+            # num_patches = ((self.image_size - self.patch_size + 1) // self.stride) ** 2
+            # len_input = num_patches * self.patch_size ** 2
+            # # self.x_omegas_1 = [torch.normal(0, std_w, size=([len_input, self.num_x_features])).double().to(self.device)] # Arjun
+            # # self.x_omegas_2 = [torch.normal(0, std_w, size=([len_input, self.num_x_features])).double().to(self.device)] # Arjun
+            # self.x_omegas_1 = [Normal(0, self.sigma0).sample([len_input, self.num_x_features]).double().to(self.device)] # DSKN
+            # self.x_omegas_2 = [Normal(0, self.sigma1).sample([len_input, self.num_x_features]).double().to(self.device)] # DSKN
+            # self.x_bs_1 = [Uniform(0, 2 * math.pi).sample([self.num_x_features]).to(self.device)]
+            # self.x_bs_2 = [Uniform(0, 2 * math.pi).sample([self.num_x_features]).to(self.device)]
+            # for i in range(1, self.depth):
+            #     self.x_omegas_1.append(Normal(0, self.sigma0 * math.pow(self.growth_factor, i)).sample([len_input, self.num_x_features]).double().to(self.device))
+            #     self.x_omegas_2.append(Normal(0, self.sigma1 * math.pow(self.growth_factor, i)).sample([len_input, self.num_x_features]).double().to(self.device))
+            #     self.x_bs_1.append(Uniform(0, 2 * math.pi).sample([self.num_x_features]).to(self.device))
+            #     self.x_bs_2.append(Uniform(0, 2 * math.pi).sample([self.num_x_features]).to(self.device))
+
+            # For shallow time RFF
+            forward_kernel = Exponential(input_dim=self.x.shape[1], variance=torch.tensor(1.0))
+            f_kernel = self.get_f_kernel(forward_kernel, self.emb_size)
+            self.t_omega = f_kernel([self.num_t_features]).double().to(self.device).t()
+            self.t_b = Uniform(0, 2 * math.pi).sample([self.num_t_features]).to(self.device)
+
+        elif self.kernel == "DeepConv2":
+
+            # Settings
+            # n, dim_x = self.x.shape
+            # std_w = math.sqrt(self.variance_w  / dim_x)
+            # std_b = math.sqrt(self.variance_b)
+            # self.num_x_features = self.num_features
+            self.num_t_features = 500
+            self.sigma0 = 1e-7
+            self.sigma1 = 1e-7
+            self.growth_factor = 1.0
+            self.out_list =  [8, 16, 16, 16, 16, 16, 16] #[64, 64, 128, 128, 256, 256, 512]
+            self.pool_dict = {0, 2, 4, 6}
+            in_channels = 1
+            kernel_size = 3
+
+            # For deep RFF for x (based on CSKN8)
+            self.op_list0 = [nn.Conv2d(in_channels, self.out_list[0], kernel_size, padding=1)]
+            self.op_list1 = [nn.Conv2d(in_channels, self.out_list[0], kernel_size, padding=1)]
+            self.bn_list = [nn.BatchNorm2d(self.out_list[0], affine=False)]
+            self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2)
+            self.avg_pool = nn.AvgPool2d(kernel_size=1, stride=1)
+            for i in range(1, len(self.out_list)):
+                op_tmp0 = nn.Conv2d(self.out_list[i-1], self.out_list[i], kernel_size, padding=1)
+                op_tmp1 = nn.Conv2d(self.out_list[i-1], self.out_list[i], kernel_size, padding=1)
+                self.op_list0.append(op_tmp0)
+                self.op_list1.append(op_tmp1)
+                self.bn_list.append(nn.BatchNorm2d(self.out_list[i], affine=False))
+            self.op_list0 = nn.ModuleList(self.op_list0)
+            self.op_list1 = nn.ModuleList(self.op_list1)
+            self.bn_list = nn.ModuleList(self.bn_list)
+            for i in range(len(self.op_list0)):
+                nn.init.normal_(self.op_list0[i].weight, 0, self.sigma0 * math.pow(self.growth_factor, i))
+                nn.init.normal_(self.op_list1[i].weight, 0, self.sigma1 * math.pow(self.growth_factor, i))
+                nn.init.uniform_(self.op_list0[i].bias, a=0, b=2*math.pi)
+                self.op_list0[i].weight.requires_grad = False
+                self.op_list1[i].weight.requires_grad = False
+                self.op_list0[i].bias.requires_grad = False
+                self.op_list1[i].bias = self.op_list0[i].bias
 
             # For shallow time RFF
             forward_kernel = Exponential(input_dim=self.x.shape[1], variance=torch.tensor(1.0))
@@ -710,29 +774,44 @@ class RandomFourierFeatures(nn.Module):
         # Separate x and time
         splitting_point = self.image_size * self.image_size
         image_x = x[:,:splitting_point]
+        image_x = image_x.unflatten(1, (1, self.image_size, self.image_size)) # reshape as an image
         time_x = x[:,splitting_point:]
 
         # CSKN
-        # for i in range(self.depth):
-        #     image_x = 1 / np.sqrt(2 * self.out_dimension) * (torch.cos(self.op_list0[i](image_x)) + torch.cos(self.op_list1[i](image_x)))
-        # phi_x = torch.flatten(x, 1)
+        for i in range(self.depth):
+            image_x = 1 / np.sqrt(2 * self.out_dimension) * (torch.cos(self.op_list0[i](image_x)) + torch.sin(self.op_list1[i](image_x)))
+            # image_x = 1 / np.sqrt(2 * self.out_dimension) * (torch.cos(self.op_list0[i](image_x)) + torch.cos(self.op_list1[i](image_x)))
+            # image_x = 1 / np.sqrt(2 * self.out_dimension) * self.op_list0[i](image_x)
+        phi_x = torch.flatten(image_x, 1)
 
         # Multi-layer RFF for x
-        for i in range(self.depth):
-            # Scaling
-            scaling = 1 / np.sqrt(2 * self.num_x_features) # DSKN scaling
-            # scaling = torch.sqrt(self.variance) * math.sqrt(2) / self.num_x_features # Arjun conv scaling
-            # Extract image patches
-            patches = self.flatten(extract_image_patches(image_x.unflatten(1, (1, self.image_size, self.image_size)), self.patch_size, stride=self.stride))
-            # Basis
-            basis_1 = patches.mm(self.x_omegas_1[i].to(torch.float32)) + self.x_bs_1[i]
-            basis_2 = patches.mm(self.x_omegas_2[i].to(torch.float32)) + self.x_bs_2[i]
-            # Features
-            features_1 = torch.cos(basis_1)
-            features_2 = torch.cos(basis_2)
-            # Combining features
-            image_x = scaling * (features_1 + features_2)
-        phi_x = image_x
+        # for i in range(self.depth):
+        #     # test
+        #     print("Layer: " + str(i))
+        #     # Scaling
+        #     scaling = 1 / np.sqrt(2 * self.num_x_features) # DSKN scaling
+        #     # scaling = torch.sqrt(self.variance) * math.sqrt(2) / self.num_x_features # Arjun conv scaling
+        #     # Extract image patches
+        #     print("before patches")
+        #     print(image_x.shape)
+        #     print(image_x)
+        #     patches = self.flatten(extract_image_patches(image_x.unflatten(1, (1, self.image_size, self.image_size)), self.patch_size, stride=self.stride))
+        #     # Basis
+        #     print("before basis")
+        #     print(patches.shape)
+        #     print(patches)
+        #     basis = patches.mm(self.x_omegas_1[i].to(torch.float32)) + self.x_bs_1[i]
+        #     # basis_1 = patches.mm(self.x_omegas_1[i].to(torch.float32)) + self.x_bs_1[i]
+        #     # basis_2 = patches.mm(self.x_omegas_2[i].to(torch.float32)) + self.x_bs_2[i]
+        #     # Features
+        #     # features = torch.cos(basis)
+        #     # features_1 = torch.cos(basis_1)
+        #     # features_2 = torch.cos(basis_2)
+        #     # Combining features
+        #     print("before scaling")
+        #     image_x = scaling * (basis)
+        #     # image_x = scaling * (features_1 + features_2)
+        # phi_x = image_x
 
         # Shallow RFF for time
         scaling = math.sqrt(2 / self.num_t_features)
@@ -742,6 +821,34 @@ class RandomFourierFeatures(nn.Module):
         phi_t = torch.concat([cos_features, sin_features], axis=1) * scaling
 
         return torch.concat([phi_x, phi_t], axis=1)
+
+    def feature_mapping_deep_conv_2(self, x):
+        # Separate x and time
+        splitting_point = self.image_size * self.image_size
+        image_x = x[:,:splitting_point]
+        image_x = image_x.unflatten(1, (1, self.image_size, self.image_size)) # reshape as an image
+        time_x = x[:,splitting_point:]
+
+        print("number of layers: " + str(len(self.op_list0)))
+
+        # CSKN8
+        for i in range(len(self.op_list0)):
+            image_x =  torch.cos(self.op_list0[i](image_x)) + torch.cos(self.op_list1[i](image_x))
+            image_x = self.bn_list[i](image_x)
+            if i in self.pool_dict:
+                image_x = self.max_pool(image_x)
+        image_x = self.avg_pool(image_x)
+        phi_x = torch.flatten(image_x, 1)
+
+        # Shallow RFF for time
+        scaling = math.sqrt(2 / self.num_t_features)
+        basis = time_x.mm(self.t_omega.to(torch.float32)) + self.t_b
+        sin_features = torch.sin(basis)
+        cos_features = torch.cos(basis)
+        phi_t = torch.concat([cos_features, sin_features], axis=1) * scaling
+
+        return torch.concat([phi_x, phi_t], axis=1)
+
 
     def feature_mapping_conv(self, x):
         # Separate image and time
@@ -756,10 +863,17 @@ class RandomFourierFeatures(nn.Module):
         # Concat time embedding
         # x_point_patches = torch.cat((x_point_patches, time_x), dim=-1)
         # x1 = x_point_patches.flatten(start_dim=1).mm(w.float()) + b
+
         x1 = x_point_patches.mm(w.float()) + b
+
+        sin_features_x = torch.sin(x1)
+        cos_features_x = torch.cos(x1)
+
+        sin_features_x = (x1)
+        cos_features_x = (x1)
         # Scale
         scaling = torch.sqrt(self.variance) * math.sqrt(2) / self.num_x_features
-        phi_x = scaling * x1
+        phi_x = scaling *  x1#torch.concat([cos_features_x, sin_features_x], axis=1)
 
         # RFF for time
         # phi_t = self.feature_mapping_rff(time_x)
