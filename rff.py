@@ -493,9 +493,6 @@ class RandomFourierFeatures(nn.Module):
                 self.op_list1[i].weight.requires_grad = False
                 self.op_list0[i].bias.requires_grad = False
                 self.op_list1[i].bias = self.op_list0[i].bias
-            print("test")
-            print(self.op_list0[0].weight.shape)
-            print(self.op_list0[1].weight.shape)
 
             # For deep RFF for x  (based on DSKN)
             # num_patches = ((self.image_size - self.patch_size + 1) // self.stride) ** 2
@@ -866,11 +863,11 @@ class RandomFourierFeatures(nn.Module):
 
         x1 = x_point_patches.mm(w.float()) + b
 
-        sin_features_x = torch.sin(x1)
-        cos_features_x = torch.cos(x1)
+        # sin_features_x = torch.sin(x1)
+        # cos_features_x = torch.cos(x1)
 
-        sin_features_x = (x1)
-        cos_features_x = (x1)
+        # sin_features_x = (x1)
+        # cos_features_x = (x1)
         # Scale
         scaling = torch.sqrt(self.variance) * math.sqrt(2) / self.num_x_features
         phi_x = scaling *  x1#torch.concat([cos_features_x, sin_features_x], axis=1)

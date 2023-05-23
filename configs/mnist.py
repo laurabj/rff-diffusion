@@ -32,7 +32,7 @@ def get_config():
     config.sin_cos = False
     config.digit = 1
     config.num_digits = 10
-    config.patch_size = 5
+    config.patch_size = 3
     config.stride = 1
     config.n_train = 1000
     config.depth = 1
