@@ -1,4 +1,6 @@
-# Contains RandomFourier Features from GP Sinkhorn repository.
+# Contains RandomFourierFeatures from GP Sinkhorn repository.
+
+# Imports
 import math
 from copy import deepcopy
 from conv_kernel import ConvSimple
@@ -15,7 +17,7 @@ from torch.distributions.uniform import Uniform
 from torch.distributions.normal import Normal
 import torch.nn.functional as F
 
-# from conv_rff
+# Adapted from Arjun's conv_rff
 def extract_image_patches(x, patch_size, stride=1, dilation=1):
     num_windows = x.shape[2] - patch_size + 1
     b,c,h,w = x.shape
@@ -25,6 +27,8 @@ def extract_image_patches(x, patch_size, stride=1, dilation=1):
     pad_col = (w2 - 1) * stride + (num_windows - 1) * dilation + 1 - w
     # print("padding: " + str(pad_row))
     pad_row, pad_col = 0, 0 # why?
+    print("before pad")
+    print(x.shape)
     x = F.pad(x, (pad_row//2, pad_row - pad_row//2, pad_col//2, pad_col - pad_col//2))
     # Extract patches
     # patches = x.unfold(2, num_windows, stride).unfold(3, num_windows, stride)
@@ -34,13 +38,13 @@ def extract_image_patches(x, patch_size, stride=1, dilation=1):
     # patches = patches.permute(0,4,5,1,2,3).contiguous()#.cuda()
     print("before reshape")
     print(patches.shape)
-    print("b: " + str(b))
+    # print("b: " + str(b))
     temp = patches.reshape(b,-1,patches.shape[-2], patches.shape[-1])
     print("after reshape")
     print("patches shape: " + str(temp.shape))
     return temp
-    # return patches.view(b,-1,patches.shape[-2], patches.shape[-1])
 
+############################### ArcCos kernel from Arjun #######################
 class ArcCos(Kernel):
 
     def __init__(self, input_dim, variance_w, variance_b, variance=None,
@@ -78,9 +82,8 @@ class ArcCos(Kernel):
 
         J = sin_theta + (torch.pi - torch.acos(cos_theta)) * cos_theta
 
-        # TODO: does it matter whether the denominator is pi or 2 * pi?
-        # CNN-GP folk use 2 * pi, but pi is also believable and works.
         return self.variance * J * multiplier / (2 * torch.pi)
+################################################################################
 
 _SUPPORTED_KERNELS = (Exponential, RBF, ArcCos)
 
@@ -113,6 +116,7 @@ class RandomFourierFeatures(nn.Module):
         image_size = 28,
         depth = 1,
         growth_factor = 1,
+        sigma0=2,
         time_emb: str = "sinusoidal",
         input_emb: str = "sinusoidal"):
 
@@ -137,6 +141,7 @@ class RandomFourierFeatures(nn.Module):
         self.variance_w = var_w
         self.variance_b = var_b
         self.depth = depth
+        self.sigma0 = sigma0
 
         # From Hamza
         self.emb_size = emb_size
@@ -169,7 +174,7 @@ class RandomFourierFeatures(nn.Module):
 
         ############################################################
 
-        ######################### BASE RFF IMPLEMENTATION (Not working) #########################
+        ######################### BASE RFF IMPLEMENTATION #########################
 
         self.arccos = isinstance(self.kernel, ArcCos)
 
@@ -180,36 +185,37 @@ class RandomFourierFeatures(nn.Module):
         else:
             self.conv = False
 
+        # Assign appropriate feature mapping based on kernel
         self.feature_mapping_fn = (
             self.feature_mapping_nn_simple if self.arccos else
             self.feature_mapping_conv if self.conv else # from conv_rff
             self.feature_mapping_dskn if kernel == "DSKN" else
             self.feature_mapping_deep_conv if kernel == "DeepConv" else
             self.feature_mapping_deep_conv_2 if kernel == "DeepConv2" else
+            self.feature_mapping_deep_conv_3 if kernel == "DeepConv3" else
             self.feature_mapping_rff)
 
         if not self.arccos:
             self.f_kernel = self.fourier_transform(self.kernel)
 
         self.init_params()
-        if kernel != "DSKN" and kernel != "DeepConv" and kernel != "DeepConv2":
+        if kernel != "DSKN" and kernel != "DeepConv" and kernel != "DeepConv2" and kernel != "DeepConv3":
             self.variance = self.kernel.variance
 
         self.phi = self.feature_mapping_fn(self.x)
-        # self.ws = self.solve_w(self.phi, self.y, self.noise)
-        temp = self.solve_w(self.phi, self.y, self.noise)
-        self.ws = temp
+        self.ws = self.solve_w(self.phi, self.y, self.noise)
+        # temp = self.solve_w(self.phi, self.y, self.noise)
+        # self.ws = temp
 
-        print("################ Base RFF #################")
+        # print("################ Base RFF #################")
         print(f"Feature shape: {self.phi.shape}")
         #print("Features")
         #print(self.phi)
-        print(f"Weights shape: {temp.shape}")
+        print(f"Weights shape: {self.ws.shape}")
         #print("Weights")
         #print(temp)
 
         ####################################################################################################################################
-
 
     def init_kernel(self, kernel):
         """ Check whether we have an instance of the kernel, and instantiate
@@ -231,6 +237,8 @@ class RandomFourierFeatures(nn.Module):
             kernel = "DeepConv"
         elif kernel == "DeepConv2":
             kernel = "DeepConv2"
+        elif kernel == "DeepConv3":
+            kernel = "DeepConv3"
         else:
             kernel = kernel(input_dim=self.x.shape[1], variance=torch.tensor(1.0))
         return kernel
@@ -407,8 +415,8 @@ class RandomFourierFeatures(nn.Module):
 
             self.num_x_features = 3000
             self.num_t_features = 3000
-            self.sigma0 = 2 #1e-2
-            self.sigma1 = 2 #1e-6
+            # self.sigma0 = 2 #1e-2
+            self.sigma1 = self.sigma0
             # self.growth_factor = 1
 
             # For deep RFF for x  (based on DSKN)
@@ -561,6 +569,28 @@ class RandomFourierFeatures(nn.Module):
             self.t_omega = f_kernel([self.num_t_features]).double().to(self.device).t()
             self.t_b = Uniform(0, 2 * math.pi).sample([self.num_t_features]).to(self.device)
 
+        elif self.kernel == "DeepConv3":
+            n, dim_x = self.x.shape
+            std_w = math.sqrt(self.variance_w  / dim_x)
+            std_b = math.sqrt(self.variance_b)
+
+            self.num_x_features = self.num_features
+            self.num_t_features = 500
+
+            num_patches = ((self.image_size - self.patch_size + 1) // self.stride) ** 2
+            len_input = num_patches * self.patch_size ** 2
+            self.conv_ws = [torch.normal(0, std_w, size=([len_input, self.num_x_features])).double().to(self.device)]
+            self.conv_bs = [torch.normal(0, std_b, size=([self.num_x_features])).to(self.device)]
+            for i in range(self.depth-1):
+                self.conv_ws.append(torch.normal(0, std_w, size=([len_input, self.num_x_features])).double().to(self.device))
+                self.conv_bs.append(torch.normal(0, std_b, size=([self.num_x_features])).to(self.device))
+
+            # For shallow time RFF
+            forward_kernel = Exponential(input_dim=self.x.shape[1], variance=torch.tensor(1.0))
+            f_kernel = self.get_f_kernel(forward_kernel, self.emb_size)
+            self.t_omega = f_kernel([self.num_t_features]).double().to(self.device).t()
+            self.t_b = Uniform(0, 2 * math.pi).sample([self.num_t_features]).to(self.device)
+
         else:
             # Single-layer RFF
             # self.omega = self.f_kernel([self.num_features]).double().to(self.device).t()
@@ -650,7 +680,7 @@ class RandomFourierFeatures(nn.Module):
         scaling = math.sqrt(2 / self.num_features) * torch.sqrt(self.variance)
 
         # Single layer RFF
-        basis = x.mm(self.omega.to(torch.float32)) + self.b
+        basis = x.mm(self.omegas[0].to(torch.float32)) + self.bs[0]
         if self.sin_cos:
             sin_features = torch.sin(basis)
             cos_features = torch.cos(basis)
@@ -682,22 +712,22 @@ class RandomFourierFeatures(nn.Module):
                 torch.rand(phi.size()[-1])/100 * torch.eye(phi.size()[-1], device=self.device)
                 ).inverse().mm(phi.t()).mm(y)
 
-    def predict_gp(self, x_pred):
-        """ Use the full GP equation to predict the value
-            for y_pred, performing the regression once per dimension.
-        """
-        total = torch.zeros([x_pred.shape[0], self.y.shape[1]], device=self.device)
-        phi_pred = self.feature_mapping_fn(x_pred)
-
-        for i in range(self.y.shape[1]):
-
-            pred = phi_pred @ self.phi.t() @ (self.phi @ self.phi.t() +
-                                              self.noise *
-                                              torch.eye(self.phi.shape[0],
-                                                        device=self.device)
-                                            ).inverse() @ self.y[:, i]
-            total[:, i] = torch.squeeze(pred)
-        return total
+    # def predict_gp(self, x_pred):
+    #     """ Use the full GP equation to predict the value
+    #         for y_pred, performing the regression once per dimension.
+    #     """
+    #     total = torch.zeros([x_pred.shape[0], self.y.shape[1]], device=self.device)
+    #     phi_pred = self.feature_mapping_fn(x_pred)
+    #
+    #     for i in range(self.y.shape[1]):
+    #
+    #         pred = phi_pred @ self.phi.t() @ (self.phi @ self.phi.t() +
+    #                                           self.noise *
+    #                                           torch.eye(self.phi.shape[0],
+    #                                                     device=self.device)
+    #                                         ).inverse() @ self.y[:, i]
+    #         total[:, i] = torch.squeeze(pred)
+    #     return total
 
     def predict(self, x_pred):
         """ Use the object's weights w and input x_pred to predict the value
@@ -846,6 +876,32 @@ class RandomFourierFeatures(nn.Module):
 
         return torch.concat([phi_x, phi_t], axis=1)
 
+    def feature_mapping_deep_conv_3(self, x):
+        # Separate image and time
+        splitting_point = self.image_size * self.image_size
+        image_x = x[:,:splitting_point]
+        time_x = x[:,splitting_point:]
+
+        # Deep RFF for image
+        scaling = torch.sqrt(self.variance) * math.sqrt(2) / self.num_x_features
+        for i in range(self.depth):
+            w = self.conv_ws[i]
+            b = self.conv_bs[i]
+            x_point_patches = self.flatten(extract_image_patches(image_x.unflatten(1, (1, 28, 28)), self.patch_size, stride=self.stride))
+            x1 = x_point_patches.mm(w.float()) + b
+        sin_features_x = torch.sin(x1) # inside loop?
+        cos_features_x = torch.cos(x1) # inside loop?
+        phi_x = scaling * torch.concat([cos_features_x, sin_features_x, x1], axis=1)
+
+        # Shallow RFF for time
+        scaling = math.sqrt(2 / self.num_t_features)
+        basis = time_x.mm(self.omega.to(torch.float32)) + self.b
+        sin_features = torch.sin(basis)
+        cos_features = torch.cos(basis)
+        phi_t = torch.concat([cos_features, sin_features], axis=1) * scaling
+
+        phi = torch.cat((phi_x, phi_t), dim=-1)
+        return phi
 
     def feature_mapping_conv(self, x):
         # Separate image and time
@@ -863,14 +919,14 @@ class RandomFourierFeatures(nn.Module):
 
         x1 = x_point_patches.mm(w.float()) + b
 
-        # sin_features_x = torch.sin(x1)
-        # cos_features_x = torch.cos(x1)
+        sin_features_x = torch.sin(x1) # new
+        cos_features_x = torch.cos(x1) # new
 
-        # sin_features_x = (x1)
-        # cos_features_x = (x1)
         # Scale
         scaling = torch.sqrt(self.variance) * math.sqrt(2) / self.num_x_features
-        phi_x = scaling *  x1#torch.concat([cos_features_x, sin_features_x], axis=1)
+        # scaling = math.sqrt(2 / self.num_t_features)
+        phi_x = scaling * torch.concat([cos_features_x, sin_features_x, x1], axis=1)
+        # phi_x = scaling * x1
 
         # RFF for time
         # phi_t = self.feature_mapping_rff(time_x)

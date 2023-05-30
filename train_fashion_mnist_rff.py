@@ -41,8 +41,8 @@ def main(config):
 
         device = "cpu" # if config.get('cpu', False) else "cuda"
 
-        X = get_mnist_data(image_size=config.image_size, digit=config.digit, n=config.n_train, num_digits=config.num_digits)
-        # X = get_fashion_mnist_data(image_size=config.image_size, c=config.digit, n=config.n_train, num_classes=config.num_digits)
+        # X = get_mnist_data(image_size=config.image_size, digit=config.digit, n=config.n_train, num_digits=config.num_digits)
+        X = get_fashion_mnist_data(image_size=config.image_size, c=config.digit, n=config.n_train, num_classes=config.num_digits)
         X = torch.as_tensor(X, dtype=torch.float32, device=device)
         print(f'X.shape: {X.shape}')
 

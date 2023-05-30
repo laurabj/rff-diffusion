@@ -29,6 +29,8 @@ def get_config():
     config.sin_cos = False
     config.depth = 1
     config.growth_factor = 1.0
+    config.sigma0 = 2.0
+    config.T = 50
 
     # Wandb Configs
     config.wandb = ml_collections.ConfigDict()

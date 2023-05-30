@@ -66,8 +66,6 @@ class MLP(nn.Module):
         x = self.joint_mlp(x)
         return x
 
-
-
 class NoiseScheduler():
     """Helper Class that implements the noise schedule and saves alpha, alphas_cumprod, and beta."""
     def __init__(self,
@@ -94,6 +92,10 @@ class NoiseScheduler():
             steps = torch.linspace(0, num_timesteps, steps=num_timesteps + 1, dtype=torch.float32)
             f_t = torch.cos(((steps / num_timesteps + cosine_epsilon) / (1.0 + cosine_epsilon)) * math.pi * 0.5) ** 2
             self.betas = torch.clip(1.0 - f_t[1:] / f_t[:num_timesteps], 0.0, 0.999).to(device)
+        elif beta_schedule == "constant":
+            self.betas = beta_end * torch.ones(num_timesteps, dtype=torch.float32)
+        elif beta_schedule == "jsd":
+            self.betas = 1. / torch.linspace(num_timesteps, 1, num_timesteps, dtype=torch.float32)
         self.alphas = 1.0 - self.betas  # alpha_t = 1 - beta_t
 
         self.alphas_cumprod = torch.cumprod(self.alphas, axis=0)   # alphas_cumprod_t = prod_{i=0}^{t-1} alpha_i
@@ -187,7 +189,6 @@ class NoiseScheduler():
         """
         s1 = self.sqrt_alphas_cumprod[timesteps]
         s2 = self.sqrt_one_minus_alphas_cumprod[timesteps]
-
         # Reshape s1 and s2 to have shape [bs, 1, ..., 1] to match the shape of x_start and x_noise.
         s1 = s1.reshape(-1, *((len(x_start.shape) - 1) * (1,)))
         s2 = s2.reshape(-1, *((len(x_start.shape) - 1) * (1,)))
